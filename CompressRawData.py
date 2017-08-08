@@ -1,4 +1,5 @@
 import openpyxl
+import configparser
 import csv
 import os
 from numpy import median
@@ -7,24 +8,38 @@ from copy import copy
 
 # Config vars
 
-# Overall
-PROTOCOL_WB = "2017_07_18_Cecilia Practice Array_Protocol.xlsx"
-OUTPUT_WB = "2017_07_18_Cecilia Practice Array_Results.xlsx"
-NUM_INPUT = 20 # number of samples
-NUM_BLOCKS = 16 # number of blocks on slide
-SAVE_ENABLED = True
+config = configparser.ConfigParser()
+config.read('scriptconfig.ini')
+
+# Required input vars
+PROTOCOL_WB = config['run info']['protocol_wb']
+OUTPUT_WB = config['run info']['output_wb']
+
+def check_and_default(config,cat,key,default):
+    if key in config[cat].keys():
+        return config[cat][key]
+    else:
+        return default
+
+# Run info
+NUM_INPUT = int(check_and_default(config,'run info','num_input','20')) # number of samples
+NUM_BLOCKS = int(check_and_default(config,'run info','num_blocks','16')) # number of blocks on slide
+SAVE_ENABLED = check_and_default(config,'run info','save_enabled','True') == 'True'
 
 # Results File Info
-DATA_COL = 'Z'
-FLAG_COL = 'A'
-NAME_COL = 'G'
-BLOC_COL = 'D'
-FIRST_ROW_DATA = 34
+DATA_COL = check_and_default(config,'results file','data_col','Z')
+FLAG_COL = check_and_default(config,'results file','flag_col','A')
+NAME_COL = check_and_default(config,'results file','name_col','G')
+BLOC_COL = check_and_default(config,'results file','bloc_col','D')
+FIRST_ROW_DATA = int(check_and_default(config,'results file','first_row_data','34'))
 
 # Protocol File Info
-SAMPLE_COL = 'B'
-SECOND_COL = 'E'
-SAMPLE_ROW = 20
+SAMPLE_COL = check_and_default(config,'protocol file','sample_col','B')
+SECOND_COL = check_and_default(config,'protocol file','second_col','E')
+SAMPLE_ROW = int(check_and_default(config,'protocol file','sample_row','20'))
+
+# Debug vars
+VERBOSE_OUTPUT = check_and_default(config,'debug','verbose_output','False') == 'True'
 
 # ===== FUNCTIONS ======
 
@@ -79,6 +94,7 @@ for i in range(NUM_INPUT):
         for row in reader:
             ws.append(row)
 if(SAVE_ENABLED):
+    print("saving data_combined.xlsx...")
     wb_combined.save("data_combined.xlsx")
     print("data_combined.xlsx saved")
 
@@ -93,7 +109,8 @@ ws.title = "raw medians"
 
 for i in range(len(wb_combined.worksheets)):
     currsheet = wb_combined.worksheets[i]
-    print("condensing sheet " + str(i))
+    if(VERBOSE_OUTPUT):
+        print("condensing sheet " + str(i))
     j = 1 #side note: I hate 1-indexing
     # get ready to see it a lot
     while(currsheet[DATA_COL+str(j+FIRST_ROW_DATA)].value is not None):
@@ -107,7 +124,8 @@ for i in range(len(wb_combined.worksheets)):
 
 # add sample names for column titles
 
-print("Adding sample names from Protocol File")
+if(VERBOSE_OUTPUT):
+    print("Adding sample names from Protocol File")
 for i in range(NUM_INPUT):
     ws.cell(row = 1, column = i+2).value = wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value
 
@@ -119,14 +137,17 @@ for i in range(len(ws['A'])-1):
     key = ws['A'+str(i+2)].value
     if key not in data.keys():
         data[key] = [list() for a in range(NUM_INPUT)]
-        print("Adding analyte ID "+key+"...")
+        if(VERBOSE_OUTPUT):
+            print("Adding analyte ID "+key+"...")
     for j in range(NUM_INPUT):
         data[key][j].append(ws.cell(row = i+2, column = j+2).value)
 
-print("Creating new worksheet")
+if(VERBOSE_OUTPUT):
+    print("Creating new worksheet")
 ws = wb_working.create_sheet("median medians")
 
-print("Adding sample and secondary names from Protocol File")
+if(VERBOSE_OUTPUT):
+    print("Adding sample and secondary names from Protocol File")
 for i in range(NUM_INPUT):
     ws.cell(row = 1, column = i+2).value = wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value + "_" + wb_protocol['Protocol'][SECOND_COL + str(SAMPLE_ROW+i)].value
 
@@ -134,7 +155,8 @@ print("Calculating median values")
 i = 2
 for key in data.keys():
     ws.cell(row = i, column = 1).value = key
-    print("Finding median of "+key+"...")
+    if(VERBOSE_OUTPUT):
+        print("Finding median of "+key+"...")
     for j in range(NUM_INPUT):
         values = [int(a) for a in data[key][j] if a != 'NA']
         if values == list():
@@ -143,7 +165,8 @@ for key in data.keys():
             ws.cell(row = i, column = j+2).value = median(values)
     i = i+1
 
-print("Setting floor to 1")
+if(VERBOSE_OUTPUT):
+    print("Setting floor to 1")
 sheetfloor(wb_working, 1)
 
 print("Consolidating identical samples")
@@ -155,14 +178,17 @@ for i in range(NUM_INPUT):
     key = ws.cell(row = 1, column = i+2).value
     if key not in data.keys():
         data[key] = [list() for a in range(num_analytes)]
-        print("Adding sample ID "+key+"...")
+        if(VERBOSE_OUTPUT):
+            print("Adding sample ID "+key+"...")
     for j in range(num_analytes):
         data[key][j].append(ws.cell(row = j+2, column = i+2).value)
 
-print("Creating new worksheet")
+if(VERBOSE_OUTPUT):
+    print("Creating new worksheet")
 ws = wb_working.create_sheet("mean samples")
 
-print("Adding analyte names from previous sheet")
+if(VERBOSE_OUTPUT):
+    print("Adding analyte names from previous sheet")
 for i in range(num_analytes):
     ws.cell(column = 1, row = i+2).value = wb_working.worksheets[2].cell(column = 1, row = i+2).value
 
@@ -170,7 +196,8 @@ print("Calculating average values")
 i = 2
 for key in data.keys():
     ws.cell(row = 1, column = i).value = key
-    print("Averaging values for "+key+"...")
+    if(VERBOSE_OUTPUT):
+        print("Averaging values for "+key+"...")
     for j in range(num_analytes):
         values = [float(a) for a in data[key][j] if a != 'NA']
         if values == list():
@@ -179,8 +206,8 @@ for key in data.keys():
             ws.cell(row = j+2, column = i).value = average(values)
     i = i+1
 
-
-print("Subtracting PBS per block and removing block identifiers")
+if(VERBOSE_OUTPUT):
+    print("Subtracting PBS per block and removing block identifiers")
 num_samples = len(ws[1]) - 1
 data = [dict() for a in range(NUM_BLOCKS)]
 for i in range(len(ws['A'])-1):
@@ -188,14 +215,17 @@ for i in range(len(ws['A'])-1):
     block = int(ID.split("_")[1]) - 1
     key = ID.split("_")[0]
     data[block][key] = [0 for a in range(num_samples)]
-    print("Adding analyte ID "+key+" to block "+str(block)+"...")
+    if(VERBOSE_OUTPUT):
+        print("Adding analyte ID "+key+" to block "+str(block)+"...")
     for j in range(num_samples):
         data[block][key][j] = ws.cell(row = i+2, column = j+2).value
 
-print("Creating new worksheet")
+if(VERBOSE_OUTPUT):
+    print("Creating new worksheet")
 ws = wb_working.create_sheet("PBS corrected")
 
-print("Adding sample names from previous sheet")
+if(VERBOSE_OUTPUT):
+    print("Adding sample names from previous sheet")
 for i in range(num_samples):
     ws.cell(column = i+2, row = 1).value = wb_working.worksheets[3].cell(column = i+2, row = 1).value
 
@@ -216,10 +246,12 @@ for block in range(16):
                 ws.cell(column = i+2, row = currrow).value = curval - curPBS
         currrow = currrow + 1
 
-print("Setting floor to 1")
+if(VERBOSE_OUTPUT):
+    print("Setting floor to 1")
 sheetfloor(wb_working, 4)
 
-print("Subtracting blanks from matching secondary")
+if(VERBOSE_OUTPUT):
+    print("Subtracting blanks from matching secondary")
 ws = wb_working.worksheets[5]
 
 data = dict()
@@ -235,10 +267,12 @@ for i in range(num_samples):
         data[secondary][sample]=[cell.value for cell in col]
         styles[secondary][sample]=[cell.font for cell in col] #need to be sure to copy styles at this point
 
-print("Creating new worksheet")
+if(VERBOSE_OUTPUT):
+    print("Creating new worksheet")
 ws = wb_working.create_sheet("blank subtracted")
 
-print("Adding analyte names from previous sheet")
+if(VERBOSE_OUTPUT):
+    print("Adding analyte names from previous sheet")
 for i in range(num_analytes):
     ws.cell(column = 1, row = i+2).value = wb_working.worksheets[5].cell(column = 1, row = i+2).value
 
@@ -259,7 +293,8 @@ for secondary in data.keys():
             ws.cell(column = currcol, row = i+2).font = copy(styles[secondary][sample][i])
         currcol = currcol + 1
 
-print("Setting floor to 1")
+if(VERBOSE_OUTPUT):
+    print("Setting floor to 1")
 sheetfloor(wb_working, 6)
         
 if(SAVE_ENABLED):
