@@ -4,6 +4,7 @@ import csv
 import os
 from numpy import median
 from numpy import average
+from numpy import transpose
 from copy import copy
 
 # Config vars
@@ -25,6 +26,9 @@ def check_and_default(config,cat,key,default):
 NUM_INPUT = int(check_and_default(config,'run info','num_input','20')) # number of samples
 NUM_BLOCKS = int(check_and_default(config,'run info','num_blocks','16')) # number of blocks on slide
 SAVE_ENABLED = check_and_default(config,'run info','save_enabled','True') == 'True'
+BLOCKWISE_PBS = check_and_default(config,'run info','blockwise_pbs','True') == 'True'
+MULTIBLOCK_ANTIGENS = check_and_default(config,'run info','multiblock_antigens','False') == 'True'
+BLANK_SAMPLES = check_and_default(config,'run info','blank_samples','True') == 'True'
 
 # Results File Info
 DATA_COL = check_and_default(config,'results file','data_col','Z')
@@ -89,7 +93,7 @@ for i in range(NUM_INPUT):
     # everything else is 1-indexed and 0-padded
 
     ws.title = curnum
-    with open("plate"+curnum+".txt") as data:
+    with open("slide"+curnum+".txt") as data:
         reader = csv.reader(data, delimiter='\t')
         for row in reader:
             ws.append(row)
@@ -115,7 +119,10 @@ for i in range(len(wb_combined.worksheets)):
     # get ready to see it a lot
     while(currsheet[DATA_COL+str(j+FIRST_ROW_DATA)].value is not None):
         if(i==0):
-            ws['A'+str(j+1)] = (currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value) + "_" + (currsheet[BLOC_COL+str(j+FIRST_ROW_DATA)].value)
+            clean_name = currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value.replace("_","-")
+            if VERBOSE_OUTPUT and clean_name != currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value:
+                print("Changed '"+ currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value +"' to '"+ clean_name +"'")
+            ws['A'+str(j+1)] = clean_name + "_" + (currsheet[BLOC_COL+str(j+FIRST_ROW_DATA)].value)
         if(currsheet[FLAG_COL+str(j+FIRST_ROW_DATA)].value == '-100'):
             ws.cell(row = j+1, column = i+2).value = 'NA'
         else:
@@ -149,7 +156,10 @@ ws = wb_working.create_sheet("median medians")
 if(VERBOSE_OUTPUT):
     print("Adding sample and secondary names from Protocol File")
 for i in range(NUM_INPUT):
-    ws.cell(row = 1, column = i+2).value = wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value + "_" + wb_protocol['Protocol'][SECOND_COL + str(SAMPLE_ROW+i)].value
+    clean_name = wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value.replace("_","-")
+    if VERBOSE_OUTPUT and clean_name != wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value:
+        print("Changed '"+ wb_protocol['Protocol'][SAMPLE_COL + str(SAMPLE_ROW+i)].value +"' to '"+ clean_name +"'")
+    ws.cell(row = 1, column = i+2).value = clean_name + "_" + wb_protocol['Protocol'][SECOND_COL + str(SAMPLE_ROW+i)].value
 
 print("Calculating median values")
 i = 2
@@ -207,7 +217,7 @@ for key in data.keys():
     i = i+1
 
 if(VERBOSE_OUTPUT):
-    print("Subtracting PBS per block and removing block identifiers")
+    print("Separating block identifiers")
 num_samples = len(ws[1]) - 1
 data = [dict() for a in range(NUM_BLOCKS)]
 for i in range(len(ws['A'])-1):
@@ -219,83 +229,118 @@ for i in range(len(ws['A'])-1):
         print("Adding analyte ID "+key+" to block "+str(block)+"...")
     for j in range(num_samples):
         data[block][key][j] = ws.cell(row = i+2, column = j+2).value
+        
+if(BLOCKWISE_PBS):
+    if(VERBOSE_OUTPUT):
+        print("Creating new worksheet")
+    ws = wb_working.create_sheet("PBS corrected")
 
-if(VERBOSE_OUTPUT):
-    print("Creating new worksheet")
-ws = wb_working.create_sheet("PBS corrected")
+    if(VERBOSE_OUTPUT):
+        print("Adding sample names from previous sheet")
+    for i in range(num_samples):
+        ws.cell(column = i+2, row = 1).value = wb_working.worksheets[3].cell(column = i+2, row = 1).value
 
-if(VERBOSE_OUTPUT):
-    print("Adding sample names from previous sheet")
-for i in range(num_samples):
-    ws.cell(column = i+2, row = 1).value = wb_working.worksheets[3].cell(column = i+2, row = 1).value
+    currrow = 2
+    for block in range(NUM_BLOCKS):
+        for key in data[block].keys():
+            ws.cell(column = 1, row = currrow).value = key
+            for i in range(len(data[block][key])):
+                curval = data[block][key][i]
+                curPBS = data[block]["PBS"][i]
+                if(curval=='NA'):
+                    ws.cell(column = i+2, row = currrow).value = 'NA'
+                elif(curPBS=='NA'):
+                    # if the PBS value is invalid, leave as is and change format
+                    ws.cell(column = i+2, row = currrow).value = curval
+                    ws.cell(column = i+2, row = currrow).font = openpyxl.styles.Font(italic=True)
+                else:
+                    ws.cell(column = i+2, row = currrow).value = curval - curPBS
+                    data[block][key][i] = curval - curPBS
+            currrow = currrow + 1
 
-currrow = 2
-for block in range(16):
-    for key in data[block].keys():
-        ws.cell(column = 1, row = currrow).value = key
-        for i in range(len(data[block][key])):
-            curval = data[block][key][i]
-            curPBS = data[block]["PBS"][i]
-            if(curval=='NA'):
-                ws.cell(column = i+2, row = currrow).value = 'NA'
-            elif(curPBS=='NA'):
-                # if the PBS value is invalid, leave as is and change format
-                ws.cell(column = i+2, row = currrow).value = curval
-                ws.cell(column = i+2, row = currrow).font = openpyxl.styles.Font(italic=True)
+    if(VERBOSE_OUTPUT):
+        print("Setting floor to 1")
+    sheetfloor(wb_working, len(wb_working.worksheets)-1)
+
+if(MULTIBLOCK_ANTIGENS):
+    if(VERBOSE_OUTPUT):
+        print("Creating new worksheet")
+        print("Averaging antigens across blocks")
+        
+    ws = wb_working.create_sheet("Blockwise Antigens Avg")
+    
+    per_sample = dict()
+    for block in range(NUM_BLOCKS):
+        for key in data[block].keys():
+            if key in per_sample.keys():
+                per_sample[key].append(data[block][key])
             else:
-                ws.cell(column = i+2, row = currrow).value = curval - curPBS
-        currrow = currrow + 1
+                per_sample[key] = [data[block][key]]
 
-if(VERBOSE_OUTPUT):
-    print("Setting floor to 1")
-sheetfloor(wb_working, 4)
 
-if(VERBOSE_OUTPUT):
-    print("Subtracting blanks from matching secondary")
-ws = wb_working.worksheets[5]
+    if(VERBOSE_OUTPUT):
+        print("Adding sample names from previous sheet")
+    for i in range(num_samples):
+        ws.cell(column = i+2, row = 1).value = wb_working.worksheets[3].cell(column = i+2, row = 1).value
 
-data = dict()
-styles = dict()
-for i in range(num_samples):
-    ID = ws.cell(row = 1, column = i+2).value
-    sample = ID.split("_")[0]
-    secondary = ID.split("_")[1]
-    if secondary not in data.keys():
-        data[secondary]=dict()
-        styles[secondary]=dict()
-    for col in ws.iter_cols(min_row=2, min_col=i+2,max_col=i+2):
-        data[secondary][sample]=[cell.value for cell in col]
-        styles[secondary][sample]=[cell.font for cell in col] #need to be sure to copy styles at this point
+    keynum = 0
+    for key in per_sample.keys():
+        ws.cell(row = keynum+2, column = 1).value = key
+        
+        rearr = transpose(per_sample[key])
+        for i in range(len(rearr)):
+            ws.cell(column = i+2, row=keynum+2).value = average(rearr[i])
 
-if(VERBOSE_OUTPUT):
-    print("Creating new worksheet")
-ws = wb_working.create_sheet("blank subtracted")
+        keynum = keynum + 1
+    
 
-if(VERBOSE_OUTPUT):
-    print("Adding analyte names from previous sheet")
-for i in range(num_analytes):
-    ws.cell(column = 1, row = i+2).value = wb_working.worksheets[5].cell(column = 1, row = i+2).value
+if(BLANK_SAMPLES):
+    if(VERBOSE_OUTPUT):
+        print("Subtracting blanks from matching secondary")
+    ws = wb_working.worksheets[-1]
 
-currcol = 2
-for secondary in data.keys():
-    for sample in data[secondary].keys():
-        ws.cell(row = 1, column = currcol).value = sample
-        for i in range(len(data[secondary][sample])):
-            curval = data[secondary][sample][i]
-            curblank = data[secondary]['Blank'][i]
-            if(curval=='NA'):
-                ws.cell(column = currcol, row = i+2).value = 'NA'
-            elif(curblank=='NA'):
-                ws.cell(column = currcol, row = i+2).value = curval
-               # ws.cell(column = currcol, row = i+2).font = openpyxl.Font(bold=True)
-            else:
-                ws.cell(column = currcol, row = i+2).value = curval - curblank
-            ws.cell(column = currcol, row = i+2).font = copy(styles[secondary][sample][i])
-        currcol = currcol + 1
+    data = dict()
+    styles = dict()
+    for i in range(num_samples):
+        ID = ws.cell(row = 1, column = i+2).value
+        sample = ID.split("_")[0]
+        secondary = ID.split("_")[1]
+        if secondary not in data.keys():
+            data[secondary]=dict()
+            styles[secondary]=dict()
+        for col in ws.iter_cols(min_row=2, min_col=i+2,max_col=i+2):
+            data[secondary][sample]=[cell.value for cell in col]
+            styles[secondary][sample]=[cell.font for cell in col] #need to be sure to copy styles at this point
 
-if(VERBOSE_OUTPUT):
-    print("Setting floor to 1")
-sheetfloor(wb_working, 6)
+    if(VERBOSE_OUTPUT):
+        print("Creating new worksheet")
+    ws = wb_working.create_sheet("blank subtracted")
+
+    if(VERBOSE_OUTPUT):
+        print("Adding analyte names from previous sheet")
+    for i in range(num_analytes):
+        ws.cell(column = 1, row = i+2).value = wb_working.worksheets[5].cell(column = 1, row = i+2).value
+
+    currcol = 2
+    for secondary in data.keys():
+        for sample in data[secondary].keys():
+            ws.cell(row = 1, column = currcol).value = sample
+            for i in range(len(data[secondary][sample])):
+                curval = data[secondary][sample][i]
+                curblank = data[secondary]['Blank'][i]
+                if(curval=='NA'):
+                    ws.cell(column = currcol, row = i+2).value = 'NA'
+                elif(curblank=='NA'):
+                    ws.cell(column = currcol, row = i+2).value = curval
+                   # ws.cell(column = currcol, row = i+2).font = openpyxl.Font(bold=True)
+                else:
+                    ws.cell(column = currcol, row = i+2).value = curval - curblank
+                ws.cell(column = currcol, row = i+2).font = copy(styles[secondary][sample][i])
+            currcol = currcol + 1
+
+    if(VERBOSE_OUTPUT):
+        print("Setting floor to 1")
+    sheetfloor(wb_working, len(wb_working.worksheets)-1)
         
 if(SAVE_ENABLED):
     wb_working.save("Results_Normalization_Process.xlsx")  
