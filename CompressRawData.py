@@ -36,6 +36,7 @@ FLAG_COL = check_and_default(config,'results file','flag_col','A')
 NAME_COL = check_and_default(config,'results file','name_col','G')
 BLOC_COL = check_and_default(config,'results file','bloc_col','D')
 FIRST_ROW_DATA = int(check_and_default(config,'results file','first_row_data','34'))
+AUTO_COL = check_and_default(config,'results file','auto_col','False') == 'True'
 
 # Protocol File Info
 SAMPLE_COL = check_and_default(config,'protocol file','sample_col','B')
@@ -73,7 +74,14 @@ def sheetfloor(wb,num):
             else:
                 ws.cell(row = j+1, column = i+1).value = value
 
-
+#returns letter name of column of given count
+def numtocol(num):
+    out = ""
+    while(num>0):
+        digit = (num - 1) % 26
+        out = chr(digit+65) + out
+        num = int((num-1)/26)
+    return out
 
 # ===== SCRIPT =====
 
@@ -117,16 +125,53 @@ for i in range(len(wb_combined.worksheets)):
         print("condensing sheet " + str(i))
     j = 1 #side note: I hate 1-indexing
     # get ready to see it a lot
-    while(currsheet[DATA_COL+str(j+FIRST_ROW_DATA)].value is not None):
+
+    #making local var versions of input columns
+    data_col = DATA_COL
+    name_col = NAME_COL
+    flag_col = FLAG_COL
+    bloc_col = BLOC_COL
+
+    #override local col vars if told to look for it, needs to be unique per sheet
+    if(AUTO_COL):
+        if(VERBOSE_OUTPUT):
+            print("automatically finding proper column headers")
+        col_test = 1
+        cols_set = 0
+        while(cols_set < 4):
+            header = currsheet[numtocol(col_test)+str(FIRST_ROW_DATA)].value
+            if(header == "F532 Median - B532"):
+                data_col = numtocol(col_test)
+                if(VERBOSE_OUTPUT):
+                    print("data_col found: " + data_col)
+                cols_set = cols_set + 1
+            elif(header == "Name"):
+                name_col = numtocol(col_test)
+                if(VERBOSE_OUTPUT):
+                    print("name_col found: " + name_col)
+                cols_set = cols_set + 1
+            elif(header == "Flags"):
+                flag_col = numtocol(col_test)
+                if(VERBOSE_OUTPUT):
+                    print("flag_col found: " + flag_col)
+                cols_set = cols_set + 1
+            elif(header == "Block"):
+                bloc_col = numtocol(col_test)
+                if(VERBOSE_OUTPUT):
+                    print("bloc_col found: " + bloc_col)
+                cols_set = cols_set + 1
+            col_test = col_test + 1
+        
+    while(currsheet[data_col+str(j+FIRST_ROW_DATA)].value is not None):
         if(i==0):
-            clean_name = currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value.replace("_","-")
-            if VERBOSE_OUTPUT and clean_name != currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value:
-                print("Changed '"+ currsheet[NAME_COL+str(j+FIRST_ROW_DATA)].value +"' to '"+ clean_name +"'")
-            ws['A'+str(j+1)] = clean_name + "_" + (currsheet[BLOC_COL+str(j+FIRST_ROW_DATA)].value)
-        if(currsheet[FLAG_COL+str(j+FIRST_ROW_DATA)].value == '-100'):
+            clean_name = currsheet[name_col+str(j+FIRST_ROW_DATA)].value.replace("_","-")
+            if VERBOSE_OUTPUT and clean_name != currsheet[name_col+str(j+FIRST_ROW_DATA)].value:
+                print("Changed '"+ currsheet[name_col+str(j+FIRST_ROW_DATA)].value +"' to '"+ clean_name +"'")
+            ws['A'+str(j+1)] = clean_name + "_" + (currsheet[bloc_col+str(j+FIRST_ROW_DATA)].value)
+        if(currsheet[flag_col+str(j+FIRST_ROW_DATA)].value == '-100'):
             ws.cell(row = j+1, column = i+2).value = 'NA'
         else:
-            ws.cell(row = j+1, column = i+2).value = currsheet[DATA_COL+str(j+FIRST_ROW_DATA)].value
+            ws.cell(row = j+1, column = i+2).value = currsheet[data_col+str(j+FIRST_ROW_DATA)].value
         j = j+1
 
 # add sample names for column titles
