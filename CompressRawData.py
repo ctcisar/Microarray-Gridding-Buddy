@@ -22,6 +22,13 @@ def check_and_default(config,cat,key,default):
     else:
         return default
 
+def is_number(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
 # Run info
 NUM_INPUT = int(check_and_default(config,'run info','num_input','20')) # number of samples
 NUM_BLOCKS = int(check_and_default(config,'run info','num_blocks','16')) # number of blocks on slide
@@ -334,7 +341,7 @@ if(MULTIBLOCK_ANTIGENS):
         
         rearr = transpose(per_sample[key])
         for i in range(len(rearr)):
-            ws.cell(column = i+2, row=keynum+2).value = average(rearr[i])
+            ws.cell(column = i+2, row=keynum+2).value = average([x.astype(float) for x in rearr[i] if is_number(x)])
 
         keynum = keynum + 1
     
@@ -364,7 +371,7 @@ if(BLANK_SAMPLES):
     if(VERBOSE_OUTPUT):
         print("Adding analyte names from previous sheet")
     for i in range(num_analytes):
-        ws.cell(column = 1, row = i+2).value = wb_working.worksheets[5].cell(column = 1, row = i+2).value
+        ws.cell(column = 1, row = i+2).value = wb_working.worksheets[-2].cell(column = 1, row = i+2).value
 
     currcol = 2
     for secondary in data.keys():
